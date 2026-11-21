@@ -676,4 +676,7 @@ More refer to the release notes." </string>
     <string name="remote_sample_perf_test_running">Testing...\nRound: %d\nElapsed: %dms\nAvg: %sms/op\nSpeed: %sMB/s</string>
     <string name="remote_sample_perf_test_done">Perf test done!\nTotal rounds: %d\nTotal time: %dms\nTotal R/W: %dMB\nSpeed: %sMB/s</string>
 
+    <string name="item_teach_repeat_title">Teach &amp; Repeat (Behavior Cloning)</string>
+    <string name="item_teach_repeat_description">Record teaching flight data (frames &amp; RC commands) and execute AI autonomous repeat flight.</string>
+
 </resources>
