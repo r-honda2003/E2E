@@ -228,13 +228,9 @@ class TeachRepeatVM : DJIViewModel() {
         // VirtualStick 有効化
         VirtualStickManager.getInstance().enableVirtualStick(object : CommonCallbacks.CompletionCallback {
             override fun onSuccess() {
-                VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
-                val param = dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam()
-                param.rollPitchCoordinateSystem = FlightCoordinateSystem.BODY
-                param.verticalControlMode = VerticalControlMode.VELOCITY
-                param.yawControlMode = YawControlMode.ANGULAR_VELOCITY
-                param.rollPitchControlMode = RollPitchControlMode.ANGLE
-                VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(param)
+                // 重要: アドバンストモードを OFF にして標準ジョイスティック制御 (-660 ~ 660) を完全有効化
+                VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
+                VirtualStickManager.getInstance().speedLevel = 1.0
 
                 // TCP サーバ接続
                 DJIExecutor.getExecutor().execute {
@@ -326,7 +322,7 @@ class TeachRepeatVM : DJIViewModel() {
                 val yaw = json.optInt("yaw", 0)
                 val throttle = json.optInt("throttle", 0)
 
-                // 4. VirtualStick 指令を送出
+                // 4. 標準スティック制御 (プロポスティックと同じ -660 ~ 660 値を代入)
                 VirtualStickManager.getInstance().rightStick.horizontalPosition = roll
                 VirtualStickManager.getInstance().rightStick.verticalPosition = pitch
                 VirtualStickManager.getInstance().leftStick.horizontalPosition = yaw

@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument("--backbone", type=str, default="mobilenet_v3_small", choices=["mobilenet_v3_small", "resnet18"], help="エンコーダバックボーン")
     parser.add_argument("--num_frames", type=int, default=3, help="入力する過去フレーム数")
     parser.add_argument("--loss", type=str, default="l1", choices=["l1", "mse"], help="損失関数 (l1 or mse)")
-    parser.add_argument("--epochs", type=int, default=30, help="エポック数")
+    parser.add_argument("--epochs", type=int, default=10, help="エポック数")
     parser.add_argument("--batch_size", type=int, default=16, help="バッチサイズ")
     parser.add_argument("--lr", type=float, default=1e-3, help="学習率")
     parser.add_argument("--freeze_backbone", action="store_true", default=True, help="バックボーンを凍結するかどうか")
