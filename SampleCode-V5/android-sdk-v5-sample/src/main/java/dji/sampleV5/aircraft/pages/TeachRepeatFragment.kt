@@ -121,8 +121,10 @@ class TeachRepeatFragment : DJIFragment(), SurfaceHolder.Callback {
             val ip = etServerIp.text.toString().trim()
             val portStr = etServerPort.text.toString().trim()
             val port = portStr.toIntOrNull() ?: 8000
-            if (ip.isNotEmpty()) {
-                viewModel.startRepeatFlight(ip, port)
+            context?.let { ctx ->
+                if (ip.isNotEmpty()) {
+                    viewModel.startRepeatFlight(ctx, ip, port)
+                }
             }
         }
 

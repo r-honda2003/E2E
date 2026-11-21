@@ -23,17 +23,19 @@ def set_seed(seed=42):
 
 class MultiFlightDroneDataset(Dataset):
     """
-    Dataset loader for multiple teach flights.
-    Aggregates image frames and control commands (roll, pitch, yaw) across all flight directories.
+    Dataset loader for multiple teach & repeat (HG-DAgger) flights.
+    Aggregates image frames and control commands (roll, pitch, yaw) across all flight and repeat_flight directories.
     """
-    def __init__(self, dataset_dir, is_train=True, img_size=(224, 224)):
+    def __init__(self, dataset_dir, is_train=True, img_size=(224, 224), use_intervened_only=False):
         self.is_train = is_train
         self.img_size = img_size
         self.samples = []
 
-        # Find all flight directories
-        flight_dirs = sorted(glob.glob(os.path.join(dataset_dir, "flight_*")))
+        # Find all flight directories (flight_* and repeat_flight_*)
+        flight_dirs = sorted(glob.glob(os.path.join(dataset_dir, "*flight_*")))
         print(f"Found {len(flight_dirs)} flight dataset directories in '{dataset_dir}'.")
+
+        total_intervened_count = 0
 
         for fdir in flight_dirs:
             csv_path = os.path.join(fdir, "commands.csv")
@@ -46,11 +48,9 @@ class MultiFlightDroneDataset(Dataset):
                 rows = list(reader)
 
             for idx, row in enumerate(rows):
-                # Images are named as 000001.jpg, 000002.jpg ... (1-indexed matching CSV row order)
                 img_name = f"{idx + 1:06d}.jpg"
                 img_path = os.path.join(fdir, img_name)
 
-                # Check png if jpg does not exist
                 if not os.path.exists(img_path):
                     img_name_png = f"{idx + 1:06d}.png"
                     img_path_png = os.path.join(fdir, img_name_png)
@@ -58,6 +58,14 @@ class MultiFlightDroneDataset(Dataset):
                         img_path = img_path_png
                     else:
                         continue
+
+                # Check intervention flag if present (HG-DAgger)
+                is_intervened = int(row.get('is_intervened', 0))
+                if is_intervened == 1:
+                    total_intervened_count += 1
+
+                if use_intervened_only and is_intervened == 0:
+                    continue
 
                 roll = float(row['roll']) / 660.0    # Normalize -660~660 to -1.0~1.0
                 pitch = float(row['pitch']) / 660.0  # Normalize -660~660 to -1.0~1.0
@@ -70,7 +78,7 @@ class MultiFlightDroneDataset(Dataset):
                     'yaw': yaw
                 })
 
-        print(f"Total collected sample frames: {len(self.samples)}")
+        print(f"Total collected sample frames: {len(self.samples)} (Human Intervention Frames: {total_intervened_count})")
 
         # Data Augmentation: ColorJitter
         self.color_jitter = transforms.ColorJitter(
@@ -124,11 +132,21 @@ def train_dronet(dataset_dir, epochs=10, batch_size=16, lr=1e-3, output_model="d
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
     model = DroNet(num_outputs=3).to(device)
+
+    # Load existing model checkpoint if present for incremental DAgger fine-tuning
+    if os.path.exists(output_model):
+        print(f"Loading existing checkpoint '{output_model}' for DAgger fine-tuning...")
+        checkpoint = torch.load(output_model, map_location=device)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     print(f"\n==================================================")
-    print(f"Starting DroNet Training for {epochs} Epochs")
+    print(f"Starting DroNet DAgger Training for {epochs} Epochs")
     print(f"Total Samples: {len(dataset)} | Batch Size: {batch_size}")
     print(f"==================================================")
 
@@ -165,5 +183,11 @@ def train_dronet(dataset_dir, epochs=10, batch_size=16, lr=1e-3, output_model="d
     print(f"\nTraining completed! Best model saved to '{output_model}' (Loss: {best_loss:.6f}).")
 
 if __name__ == "__main__":
-    dataset_path = "/home/ruri/E2E/e2e/SampleCode-V5/bc_teach_repeat/dataset"
-    train_dronet(dataset_dir=dataset_path, epochs=10, batch_size=16, lr=1e-3, output_model="dronet_best.pth")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--dataset_dir", type=str, default="/home/ruri/E2E/e2e/SampleCode-V5/bc_teach_repeat/dataset")
+    parser.add_argument("--output_model", type=str, default="dronet_best.pth")
+    args = parser.parse_args()
+
+    train_dronet(dataset_dir=args.dataset_dir, epochs=args.epochs, batch_size=16, lr=1e-3, output_model=args.output_model)

@@ -14,10 +14,6 @@ import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.RemoteControllerKey
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.v5.et.action
-import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
-import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
-import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
-import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
@@ -53,14 +49,19 @@ class TeachRepeatVM : DJIViewModel() {
     val isTeachRecording = MutableLiveData(false)
     val teachStatusText = MutableLiveData("Teach Recording: Stopped\nSaved frames: 0")
     private var teachFrameCount = 0
-    private var currentFlightDir: File? = null
-    private var csvWriter: PrintWriter? = null
+    private var currentTeachDir: File? = null
+    private var teachCsvWriter: PrintWriter? = null
 
-    // Repeat モード (自動飛行) ステータス
+    // Repeat モード (自動飛行 + 人間介入記録) ステータス
     val isRepeatRunning = MutableLiveData(false)
     val repeatStatusText = MutableLiveData("Repeat Flight: Stopped\nServer: Not Connected")
     private var tcpSocket: Socket? = null
     private val isSocketConnected = AtomicBoolean(false)
+
+    // Repeat モード中のログ保存用
+    private var repeatFrameCount = 0
+    private var currentRepeatDir: File? = null
+    private var repeatCsvWriter: PrintWriter? = null
 
     // 最新のカメラフレームキャッシュ (NV21 / RGBA)
     private var latestFrameData: ByteArray? = null
@@ -71,6 +72,9 @@ class TeachRepeatVM : DJIViewModel() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
     private val INTERVAL_MS = 100L // 10Hz (100ms)
+
+    // 人間の手動介入判定しきい値 (-660 ~ 660 のスケール中)
+    private val INTERVENTION_THRESHOLD = 50
 
     private val cameraFrameListener = object : ICameraStreamManager.CameraFrameListener {
         override fun onFrame(frameData: ByteArray, offset: Int, length: Int, width: Int, height: Int, format: FrameFormat) {
@@ -148,22 +152,22 @@ class TeachRepeatVM : DJIViewModel() {
     fun startTeachRecording(context: Context) {
         if (isTeachRecording.value == true) return
 
-        val sdf = SimpleDateFormat("yyyyMMDD_HHmmss", Locale.getDefault())
+        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
         val flightName = "flight_${sdf.format(Date())}"
 
         val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
-        currentFlightDir = File(baseDir, "TeachRepeatData/$flightName")
-        if (!currentFlightDir!!.exists()) {
-            currentFlightDir!!.mkdirs()
+        currentTeachDir = File(baseDir, "TeachRepeatData/$flightName")
+        if (!currentTeachDir!!.exists()) {
+            currentTeachDir!!.mkdirs()
         }
 
-        val csvFile = File(currentFlightDir, "commands.csv")
-        csvWriter = PrintWriter(FileOutputStream(csvFile, true))
-        csvWriter?.println("timestamp,roll,pitch,yaw,throttle")
+        val csvFile = File(currentTeachDir, "commands.csv")
+        teachCsvWriter = PrintWriter(FileOutputStream(csvFile, true))
+        teachCsvWriter?.println("timestamp,roll,pitch,yaw,throttle")
 
         teachFrameCount = 0
         isTeachRecording.value = true
-        teachStatusText.value = "Teach Recording: STARTED\nDir: ${currentFlightDir?.name}\nSaved: 0 frames"
+        teachStatusText.value = "Teach Recording: STARTED\nDir: ${currentTeachDir?.name}\nSaved: 0 frames"
 
         startTimerLoop()
     }
@@ -174,11 +178,11 @@ class TeachRepeatVM : DJIViewModel() {
         isTeachRecording.value = false
         stopTimerLoop()
 
-        csvWriter?.flush()
-        csvWriter?.close()
-        csvWriter = null
+        teachCsvWriter?.flush()
+        teachCsvWriter?.close()
+        teachCsvWriter = null
 
-        teachStatusText.value = "Teach Recording: STOPPED\nSaved Total: $teachFrameCount frames\nPath: ${currentFlightDir?.absolutePath}"
+        teachStatusText.value = "Teach Recording: STOPPED\nSaved Total: $teachFrameCount frames\nPath: ${currentTeachDir?.name}"
     }
 
     private fun processTeachFrame() {
@@ -201,16 +205,16 @@ class TeachRepeatVM : DJIViewModel() {
                 val timeSec = teachFrameCount * 0.1
 
                 // 画像保存 (000001.jpg, 000002.jpg...)
-                val imgFile = File(currentFlightDir, String.format(Locale.US, "%06d.jpg", teachFrameCount))
+                val imgFile = File(currentTeachDir, String.format(Locale.US, "%06d.jpg", teachFrameCount))
                 saveFrameToJpeg(bytes, w, h, fmt, imgFile)
 
                 // コマンドの CSV 保存
                 val sv = stickValue.value ?: RCStickValue(0, 0, 0, 0)
-                csvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d", timeSec, sv.roll, sv.pitch, sv.yaw, sv.throttle))
-                csvWriter?.flush()
+                teachCsvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d", timeSec, sv.roll, sv.pitch, sv.yaw, sv.throttle))
+                teachCsvWriter?.flush()
 
                 mainHandler.post {
-                    teachStatusText.value = "Teach Recording: RUNNING\nFlight: ${currentFlightDir?.name}\nSaved: $teachFrameCount frames\nRoll:${sv.roll} Pitch:${sv.pitch} Yaw:${sv.yaw}"
+                    teachStatusText.value = "Teach Recording: RUNNING\nFlight: ${currentTeachDir?.name}\nSaved: $teachFrameCount frames\nRoll:${sv.roll} Pitch:${sv.pitch} Yaw:${sv.yaw}"
                 }
             } catch (e: Exception) {
                 LogUtils.e(TAG, "Error saving teach frame: ${e.message}")
@@ -219,16 +223,29 @@ class TeachRepeatVM : DJIViewModel() {
     }
 
     // -----------------------------------------------------------------------------------------
-    // 2. Repeat モード (リアルタイム自動飛行機能)
+    // 2. Repeat モード (リアルタイム AI 自動飛行 + 人間手動介入 + DAggerログ自動記録)
     // -----------------------------------------------------------------------------------------
 
-    fun startRepeatFlight(ip: String, port: Int) {
+    fun startRepeatFlight(context: Context, ip: String, port: Int) {
         if (isRepeatRunning.value == true) return
+
+        // Repeat 飛行中のログ保存用フォルダ作成 (repeat_flight_YYYYMMDD_HHMMSS)
+        val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+        val flightName = "repeat_flight_${sdf.format(Date())}"
+        val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
+        currentRepeatDir = File(baseDir, "TeachRepeatData/$flightName")
+        if (!currentRepeatDir!!.exists()) {
+            currentRepeatDir!!.mkdirs()
+        }
+
+        val csvFile = File(currentRepeatDir, "commands.csv")
+        repeatCsvWriter = PrintWriter(FileOutputStream(csvFile, true))
+        repeatCsvWriter?.println("timestamp,roll,pitch,yaw,throttle,is_intervened")
+        repeatFrameCount = 0
 
         // VirtualStick 有効化
         VirtualStickManager.getInstance().enableVirtualStick(object : CommonCallbacks.CompletionCallback {
             override fun onSuccess() {
-                // 重要: アドバンストモードを OFF にして標準ジョイスティック制御 (-660 ~ 660) を完全有効化
                 VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
                 VirtualStickManager.getInstance().speedLevel = 1.0
 
@@ -241,7 +258,7 @@ class TeachRepeatVM : DJIViewModel() {
 
                         mainHandler.post {
                             isRepeatRunning.value = true
-                            repeatStatusText.value = "Repeat Flight: RUNNING\nConnected to $ip:$port"
+                            repeatStatusText.value = "Repeat Flight: RUNNING\nConnected to $ip:$port\nLogging to: $flightName"
                             startTimerLoop()
                         }
                     } catch (e: Exception) {
@@ -275,8 +292,12 @@ class TeachRepeatVM : DJIViewModel() {
             }
         }
 
+        repeatCsvWriter?.flush()
+        repeatCsvWriter?.close()
+        repeatCsvWriter = null
+
         disableVirtualStick()
-        repeatStatusText.value = "Repeat Flight: STOPPED"
+        repeatStatusText.value = "Repeat Flight: STOPPED\nSaved DAgger Log: $repeatFrameCount frames"
     }
 
     private fun disableVirtualStick() {
@@ -311,25 +332,53 @@ class TeachRepeatVM : DJIViewModel() {
                 outputStream.write(jpegBytes)
                 outputStream.flush()
 
-                // 3. 応答 JSON 受信
+                // 3. AI (DroNet) 応答 JSON 受信
                 val inputStream = tcpSocket?.getInputStream() ?: return@execute
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream))
                 val jsonLine = reader.readLine() ?: return@execute
 
                 val json = JSONObject(jsonLine)
-                val roll = json.optInt("roll", 0)
-                val pitch = json.optInt("pitch", 0)
-                val yaw = json.optInt("yaw", 0)
-                val throttle = json.optInt("throttle", 0)
+                val aiRoll = json.optInt("roll", 0)
+                val aiPitch = json.optInt("pitch", 0)
+                val aiYaw = json.optInt("yaw", 0)
+                val aiThrottle = json.optInt("throttle", 0)
 
-                // 4. 標準スティック制御 (プロポスティックと同じ -660 ~ 660 値を代入)
-                VirtualStickManager.getInstance().rightStick.horizontalPosition = roll
-                VirtualStickManager.getInstance().rightStick.verticalPosition = pitch
-                VirtualStickManager.getInstance().leftStick.horizontalPosition = yaw
-                VirtualStickManager.getInstance().leftStick.verticalPosition = throttle
+                // 4. 人間の手動介入 (HG-DAgger) チェック
+                val sv = stickValue.value ?: RCStickValue(0, 0, 0, 0)
+                val isHumanIntervening = Math.abs(sv.roll) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(sv.pitch) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(sv.yaw) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(sv.throttle) > INTERVENTION_THRESHOLD
+
+                // 実際にドローンへ送信する制御コマンド決定
+                val targetRoll = if (isHumanIntervening) sv.roll else aiRoll
+                val targetPitch = if (isHumanIntervening) sv.pitch else aiPitch
+                val targetYaw = if (isHumanIntervening) sv.yaw else aiYaw
+                val targetThrottle = if (isHumanIntervening) sv.throttle else aiThrottle
+
+                // ドローン制御実行
+                VirtualStickManager.getInstance().rightStick.horizontalPosition = targetRoll
+                VirtualStickManager.getInstance().rightStick.verticalPosition = targetPitch
+                VirtualStickManager.getInstance().leftStick.horizontalPosition = targetYaw
+                VirtualStickManager.getInstance().leftStick.verticalPosition = targetThrottle
+
+                // 5. Repeat 飛行中もカメラ画像と実操作ログ (DAgger 用) を自動記録
+                repeatFrameCount++
+                val timeSec = repeatFrameCount * 0.1
+                val imgFile = File(currentRepeatDir, String.format(Locale.US, "%06d.jpg", repeatFrameCount))
+                saveFrameToJpeg(bytes, w, h, fmt, imgFile)
+
+                // 介入フラグ (1: 人間介入による修正操作, 0: AI操作)
+                val isIntervenedFlag = if (isHumanIntervening) 1 else 0
+                repeatCsvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d,%d", timeSec, targetRoll, targetPitch, targetYaw, targetThrottle, isIntervenedFlag))
+                repeatCsvWriter?.flush()
 
                 mainHandler.post {
-                    repeatStatusText.value = "Repeat Active\nRecv Cmd -> Roll:$roll Pitch:$pitch Yaw:$yaw"
+                    if (isHumanIntervening) {
+                        repeatStatusText.value = "Repeat Active: [HUMAN INTERVENED!]\nOverride -> Roll:${sv.roll} Pitch:${sv.pitch} Yaw:${sv.yaw}\nSaved Frame: $repeatFrameCount"
+                    } else {
+                        repeatStatusText.value = "Repeat Active: [AI Controlling]\nDroNet -> Roll:$aiRoll Pitch:$aiPitch Yaw:$aiYaw\nSaved Frame: $repeatFrameCount"
+                    }
                 }
             } catch (e: Exception) {
                 LogUtils.e(TAG, "Error in repeat loop: ${e.message}")
