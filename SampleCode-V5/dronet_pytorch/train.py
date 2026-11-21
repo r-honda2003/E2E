@@ -2,6 +2,7 @@ import os
 import csv
 import glob
 import random
+import argparse
 import numpy as np
 from PIL import Image
 
@@ -23,17 +24,23 @@ def set_seed(seed=42):
 
 class MultiFlightDroneDataset(Dataset):
     """
-    Dataset loader for multiple teach & repeat (HG-DAgger) flights.
-    Aggregates image frames and control commands (roll, pitch, yaw) across all flight and repeat_flight directories.
+    Dataset loader for teach & repeat flights.
+    Can load all flights or specific flight directory (e.g., 1st run only).
     """
-    def __init__(self, dataset_dir, is_train=True, img_size=(224, 224), use_intervened_only=False):
+    def __init__(self, dataset_dir, target_folder=None, is_train=True, img_size=(224, 224), use_intervened_only=False):
         self.is_train = is_train
         self.img_size = img_size
         self.samples = []
 
-        # Find all flight directories (flight_* and repeat_flight_*)
-        flight_dirs = sorted(glob.glob(os.path.join(dataset_dir, "*flight_*")))
-        print(f"Found {len(flight_dirs)} flight dataset directories in '{dataset_dir}'.")
+        if target_folder:
+            # Load specific single flight folder
+            full_target = os.path.join(dataset_dir, target_folder) if not target_folder.startswith('/') else target_folder
+            flight_dirs = [full_target] if os.path.exists(full_target) else []
+        else:
+            # Find all flight directories
+            flight_dirs = sorted(glob.glob(os.path.join(dataset_dir, "*flight_*")))
+
+        print(f"Target dataset directories ({len(flight_dirs)}): {flight_dirs}")
 
         total_intervened_count = 0
 
@@ -59,7 +66,7 @@ class MultiFlightDroneDataset(Dataset):
                     else:
                         continue
 
-                # Check intervention flag if present (HG-DAgger)
+                # Check intervention flag if present
                 is_intervened = int(row.get('is_intervened', 0))
                 if is_intervened == 1:
                     total_intervened_count += 1
@@ -119,34 +126,27 @@ class MultiFlightDroneDataset(Dataset):
         return image_tensor, target
 
 
-def train_dronet(dataset_dir, epochs=10, batch_size=16, lr=1e-3, output_model="dronet_best.pth"):
+def train_dronet(dataset_dir, target_folder=None, epochs=10, batch_size=16, lr=1e-3, output_model="dronet_best.pth"):
     set_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device} for training.")
 
-    dataset = MultiFlightDroneDataset(dataset_dir=dataset_dir, is_train=True)
+    dataset = MultiFlightDroneDataset(dataset_dir=dataset_dir, target_folder=target_folder, is_train=True)
     if len(dataset) == 0:
         print("ERROR: No valid dataset frames found!")
         return
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
+    # Initialize fresh DroNet model for 1st run training
     model = DroNet(num_outputs=3).to(device)
-
-    # Load existing model checkpoint if present for incremental DAgger fine-tuning
-    if os.path.exists(output_model):
-        print(f"Loading existing checkpoint '{output_model}' for DAgger fine-tuning...")
-        checkpoint = torch.load(output_model, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     print(f"\n==================================================")
-    print(f"Starting DroNet DAgger Training for {epochs} Epochs")
+    print(f"Starting DroNet Training for {epochs} Epochs")
+    print(f"Target Folder: {target_folder if target_folder else 'ALL'}")
     print(f"Total Samples: {len(dataset)} | Batch Size: {batch_size}")
     print(f"==================================================")
 
@@ -183,11 +183,18 @@ def train_dronet(dataset_dir, epochs=10, batch_size=16, lr=1e-3, output_model="d
     print(f"\nTraining completed! Best model saved to '{output_model}' (Loss: {best_loss:.6f}).")
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--dataset_dir", type=str, default="/home/ruri/E2E/e2e/SampleCode-V5/bc_teach_repeat/dataset")
+    parser.add_argument("--target_folder", type=str, default="", help="Specific flight folder name (e.g. flight_202611325_130442)")
     parser.add_argument("--output_model", type=str, default="dronet_best.pth")
     args = parser.parse_args()
 
-    train_dronet(dataset_dir=args.dataset_dir, epochs=args.epochs, batch_size=16, lr=1e-3, output_model=args.output_model)
+    train_dronet(
+        dataset_dir=args.dataset_dir,
+        target_folder=args.target_folder if args.target_folder else None,
+        epochs=args.epochs,
+        batch_size=16,
+        lr=1e-3,
+        output_model=args.output_model
+    )
