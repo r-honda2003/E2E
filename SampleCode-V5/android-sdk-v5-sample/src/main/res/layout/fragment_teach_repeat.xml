@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="#121212">
+
+    <!-- タイトル -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Teach &amp; Repeat (End-to-End Behavior Cloning)"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- 左側: カメラ映像表示領域 -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="#000000">
+
+            <SurfaceView
+                android:id="@+id/sv_camera"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/tv_camera_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|left"
+                android:padding="4dp"
+                android:text="Camera Stream"
+                android:textColor="#00FF00"
+                android:textSize="12sp" />
+        </FrameLayout>
+
+        <!-- 右側: コントロールパネル -->
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.2"
+            android:paddingLeft="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- リアルタイム プロポ スティック値表示 -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="[RC Stick Status (-660 ~ 660)]"
+                    android:textColor="#FFCC00"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_stick_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Roll: 0 | Pitch: 0 | Yaw: 0 | Throttle: 0"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:background="#222222"
+                    android:padding="6dp"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- 1. Teach モード (データ録画) セクション -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1. Teach Mode (Data Recording)"
+                    android:textColor="#00E5FF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp">
+
+                    <Button
+                        android:id="@+id/btn_start_teach"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Start Teach Rec"
+                        android:backgroundTint="#2E7D32"
+                        android:textColor="#FFFFFF" />
+
+                    <Button
+                        android:id="@+id/btn_stop_teach"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Stop Teach Rec"
+                        android:enabled="false"
+                        android:backgroundTint="#C62828"
+                        android:textColor="#FFFFFF"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_teach_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Teach Recording: Stopped\nSaved frames: 0"
+                    android:textColor="#CCCCCC"
+                    android:textSize="12sp"
+                    android:background="#222222"
+                    android:padding="6dp"
+                    android:layout_marginBottom="16dp" />
+
+                <!-- 2. Repeat モード (リアルタイム自動飛行) セクション -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="2. Repeat Mode (AI Autonomous Flight)"
+                    android:textColor="#FF4081"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp">
+
+                    <EditText
+                        android:id="@+id/et_server_ip"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="2"
+                        android:hint="PC Server IP"
+                        android:text="192.168.1.10"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#888888"
+                        android:textSize="13sp" />
+
+                    <EditText
+                        android:id="@+id/et_server_port"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="Port"
+                        android:text="8000"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#888888"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp">
+
+                    <Button
+                        android:id="@+id/btn_start_repeat"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Start Repeat"
+                        android:backgroundTint="#1565C0"
+                        android:textColor="#FFFFFF" />
+
+                    <Button
+                        android:id="@+id/btn_stop_repeat"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Stop Repeat"
+                        android:enabled="false"
+                        android:backgroundTint="#C62828"
+                        android:textColor="#FFFFFF"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_repeat_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Repeat Flight: Stopped\nServer: Not Connected"
+                    android:textColor="#CCCCCC"
+                    android:textSize="12sp"
+                    android:background="#222222"
+                    android:padding="6dp" />
+
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+
+</LinearLayout>

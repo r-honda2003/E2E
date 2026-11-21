@@ -227,4 +227,10 @@
         android:name="dji.sampleV5.aircraft.pages.IntelligentFlightFragment"
         android:label="intelligent_flight_page"
         tools:layout="@layout/frag_intelligent_flight_page"/>
+
+    <fragment
+        android:id="@+id/teach_repeat_page"
+        android:name="dji.sampleV5.aircraft.pages.TeachRepeatFragment"
+        android:label="teach_repeat_page"
+        tools:layout="@layout/fragment_teach_repeat"/>
 </navigation>
