@@ -42,7 +42,13 @@ class TeachRepeatVM : DJIViewModel() {
 
     private val TAG = "TeachRepeatVM"
 
-    // RC Stick ステータス (-660 ~ 660)
+    // リアルタイム RC スティック値 (スレッドセーフな直接読み出し用)
+    @Volatile private var currentRoll = 0
+    @Volatile private var currentPitch = 0
+    @Volatile private var currentYaw = 0
+    @Volatile private var currentThrottle = 0
+
+    // UI表示用 LiveData
     val stickValue = MutableLiveData(RCStickValue(0, 0, 0, 0))
 
     // Teach モード (録画) ステータス
@@ -63,7 +69,7 @@ class TeachRepeatVM : DJIViewModel() {
     private var currentRepeatDir: File? = null
     private var repeatCsvWriter: PrintWriter? = null
 
-    // 最新のカメラフレームキャッシュ (NV21 / RGBA)
+    // 最新のカメラフレームキャッシュ
     private var latestFrameData: ByteArray? = null
     private var latestFrameWidth = 0
     private var latestFrameHeight = 0
@@ -73,8 +79,8 @@ class TeachRepeatVM : DJIViewModel() {
     private var timerRunnable: Runnable? = null
     private val INTERVAL_MS = 100L // 10Hz (100ms)
 
-    // 人間の手動介入判定しきい値 (-660 ~ 660 のスケール中)
-    private val INTERVENTION_THRESHOLD = 50
+    // 人間の手動介入判定しきい値 (-660 ~ 660 のスケール中、感度を高く設定)
+    private val INTERVENTION_THRESHOLD = 30
 
     private val cameraFrameListener = object : ICameraStreamManager.CameraFrameListener {
         override fun onFrame(frameData: ByteArray, offset: Int, length: Int, width: Int, height: Int, format: FrameFormat) {
@@ -95,26 +101,38 @@ class TeachRepeatVM : DJIViewModel() {
     }
 
     private fun listenRCStick() {
-        // 右スティック Horizontal (Roll: 左右傾き)
+        // 右スティック Horizontal (Roll: 左右)
         RemoteControllerKey.KeyStickRightHorizontal.create().listen(this) { val1 ->
-            val1?.let { stickValue.value?.roll = it }
-            stickValue.postValue(stickValue.value)
+            val1?.let {
+                currentRoll = it
+                updateUiStick()
+            }
         }
         // 右スティック Vertical (Pitch: 前後)
         RemoteControllerKey.KeyStickRightVertical.create().listen(this) { val2 ->
-            val2?.let { stickValue.value?.pitch = it }
-            stickValue.postValue(stickValue.value)
+            val2?.let {
+                currentPitch = it
+                updateUiStick()
+            }
         }
         // 左スティック Horizontal (Yaw: 旋回)
         RemoteControllerKey.KeyStickLeftHorizontal.create().listen(this) { val3 ->
-            val3?.let { stickValue.value?.yaw = it }
-            stickValue.postValue(stickValue.value)
+            val3?.let {
+                currentYaw = it
+                updateUiStick()
+            }
         }
         // 左スティック Vertical (Throttle: 上下)
         RemoteControllerKey.KeyStickLeftVertical.create().listen(this) { val4 ->
-            val4?.let { stickValue.value?.throttle = it }
-            stickValue.postValue(stickValue.value)
+            val4?.let {
+                currentThrottle = it
+                updateUiStick()
+            }
         }
+    }
+
+    private fun updateUiStick() {
+        stickValue.postValue(RCStickValue(currentRoll, currentPitch, currentYaw, currentThrottle))
     }
 
     fun startTakeOff() {
@@ -204,17 +222,19 @@ class TeachRepeatVM : DJIViewModel() {
                 teachFrameCount++
                 val timeSec = teachFrameCount * 0.1
 
-                // 画像保存 (000001.jpg, 000002.jpg...)
                 val imgFile = File(currentTeachDir, String.format(Locale.US, "%06d.jpg", teachFrameCount))
                 saveFrameToJpeg(bytes, w, h, fmt, imgFile)
 
-                // コマンドの CSV 保存
-                val sv = stickValue.value ?: RCStickValue(0, 0, 0, 0)
-                teachCsvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d", timeSec, sv.roll, sv.pitch, sv.yaw, sv.throttle))
+                val r = currentRoll
+                val p = currentPitch
+                val y = currentYaw
+                val t = currentThrottle
+
+                teachCsvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d", timeSec, r, p, y, t))
                 teachCsvWriter?.flush()
 
                 mainHandler.post {
-                    teachStatusText.value = "Teach Recording: RUNNING\nFlight: ${currentTeachDir?.name}\nSaved: $teachFrameCount frames\nRoll:${sv.roll} Pitch:${sv.pitch} Yaw:${sv.yaw}"
+                    teachStatusText.value = "Teach Recording: RUNNING\nFlight: ${currentTeachDir?.name}\nSaved: $teachFrameCount frames\nRoll:$r Pitch:$p Yaw:$y"
                 }
             } catch (e: Exception) {
                 LogUtils.e(TAG, "Error saving teach frame: ${e.message}")
@@ -229,7 +249,6 @@ class TeachRepeatVM : DJIViewModel() {
     fun startRepeatFlight(context: Context, ip: String, port: Int) {
         if (isRepeatRunning.value == true) return
 
-        // Repeat 飛行中のログ保存用フォルダ作成 (repeat_flight_YYYYMMDD_HHMMSS)
         val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
         val flightName = "repeat_flight_${sdf.format(Date())}"
         val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS) ?: context.filesDir
@@ -243,13 +262,11 @@ class TeachRepeatVM : DJIViewModel() {
         repeatCsvWriter?.println("timestamp,roll,pitch,yaw,throttle,is_intervened")
         repeatFrameCount = 0
 
-        // VirtualStick 有効化
         VirtualStickManager.getInstance().enableVirtualStick(object : CommonCallbacks.CompletionCallback {
             override fun onSuccess() {
                 VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
                 VirtualStickManager.getInstance().speedLevel = 1.0
 
-                // TCP サーバ接続
                 DJIExecutor.getExecutor().execute {
                     try {
                         tcpSocket = Socket()
@@ -343,41 +360,45 @@ class TeachRepeatVM : DJIViewModel() {
                 val aiYaw = json.optInt("yaw", 0)
                 val aiThrottle = json.optInt("throttle", 0)
 
-                // 4. 人間の手動介入 (HG-DAgger) チェック
-                val sv = stickValue.value ?: RCStickValue(0, 0, 0, 0)
-                val isHumanIntervening = Math.abs(sv.roll) > INTERVENTION_THRESHOLD ||
-                                         Math.abs(sv.pitch) > INTERVENTION_THRESHOLD ||
-                                         Math.abs(sv.yaw) > INTERVENTION_THRESHOLD ||
-                                         Math.abs(sv.throttle) > INTERVENTION_THRESHOLD
+                // 4. 人間の最新プロポ入力生値をリアルタイム取得
+                val r = currentRoll
+                val p = currentPitch
+                val y = currentYaw
+                val t = currentThrottle
 
-                // 実際にドローンへ送信する制御コマンド決定
-                val targetRoll = if (isHumanIntervening) sv.roll else aiRoll
-                val targetPitch = if (isHumanIntervening) sv.pitch else aiPitch
-                val targetYaw = if (isHumanIntervening) sv.yaw else aiYaw
-                val targetThrottle = if (isHumanIntervening) sv.throttle else aiThrottle
+                // 手動介入判定 (どれか一つの軸でもしきい値 > 30 を超えていたら人間介入とみなす)
+                val isHumanIntervening = Math.abs(r) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(p) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(y) > INTERVENTION_THRESHOLD ||
+                                         Math.abs(t) > INTERVENTION_THRESHOLD
 
-                // ドローン制御実行
+                // 送信ターゲットの決定 (人間介入時はプロポ生値、非介入時は AI の計算値)
+                val targetRoll = if (isHumanIntervening) r else aiRoll
+                val targetPitch = if (isHumanIntervening) p else aiPitch
+                val targetYaw = if (isHumanIntervening) y else aiYaw
+                val targetThrottle = if (isHumanIntervening) t else aiThrottle
+
+                // バーチャルスティックにコマンド反映
                 VirtualStickManager.getInstance().rightStick.horizontalPosition = targetRoll
                 VirtualStickManager.getInstance().rightStick.verticalPosition = targetPitch
                 VirtualStickManager.getInstance().leftStick.horizontalPosition = targetYaw
                 VirtualStickManager.getInstance().leftStick.verticalPosition = targetThrottle
 
-                // 5. Repeat 飛行中もカメラ画像と実操作ログ (DAgger 用) を自動記録
+                // 5. カメラ画像と実操作ログ (DAgger用) を自動記録
                 repeatFrameCount++
                 val timeSec = repeatFrameCount * 0.1
                 val imgFile = File(currentRepeatDir, String.format(Locale.US, "%06d.jpg", repeatFrameCount))
                 saveFrameToJpeg(bytes, w, h, fmt, imgFile)
 
-                // 介入フラグ (1: 人間介入による修正操作, 0: AI操作)
                 val isIntervenedFlag = if (isHumanIntervening) 1 else 0
                 repeatCsvWriter?.println(String.format(Locale.US, "%.2f,%d,%d,%d,%d,%d", timeSec, targetRoll, targetPitch, targetYaw, targetThrottle, isIntervenedFlag))
                 repeatCsvWriter?.flush()
 
                 mainHandler.post {
                     if (isHumanIntervening) {
-                        repeatStatusText.value = "Repeat Active: [HUMAN INTERVENED!]\nOverride -> Roll:${sv.roll} Pitch:${sv.pitch} Yaw:${sv.yaw}\nSaved Frame: $repeatFrameCount"
+                        repeatStatusText.value = "Repeat Active: [HUMAN INTERVENED!]\nOverride -> Roll:$r Pitch:$p Yaw:$y\nFrame: $repeatFrameCount"
                     } else {
-                        repeatStatusText.value = "Repeat Active: [AI Controlling]\nDroNet -> Roll:$aiRoll Pitch:$aiPitch Yaw:$aiYaw\nSaved Frame: $repeatFrameCount"
+                        repeatStatusText.value = "Repeat Active: [AI Controlling]\nDroNet -> Roll:$aiRoll Pitch:$aiPitch Yaw:$aiYaw\nFrame: $repeatFrameCount"
                     }
                 }
             } catch (e: Exception) {
