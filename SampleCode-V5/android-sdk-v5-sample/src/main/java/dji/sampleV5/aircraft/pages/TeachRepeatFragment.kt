@@ -21,6 +21,8 @@ class TeachRepeatFragment : DJIFragment(), SurfaceHolder.Callback {
     private val viewModel: TeachRepeatVM by viewModels()
 
     private lateinit var cameraSurfaceView: SurfaceView
+    private lateinit var btnTakeoff: Button
+    private lateinit var btnLanding: Button
     private lateinit var tvStickStatus: TextView
     private lateinit var btnStartTeach: Button
     private lateinit var btnStopTeach: Button
@@ -45,6 +47,8 @@ class TeachRepeatFragment : DJIFragment(), SurfaceHolder.Callback {
         super.onViewCreated(view, savedInstanceState)
 
         cameraSurfaceView = view.findViewById(R.id.sv_camera)
+        btnTakeoff = view.findViewById(R.id.btn_takeoff)
+        btnLanding = view.findViewById(R.id.btn_landing)
         tvStickStatus = view.findViewById(R.id.tv_stick_status)
         btnStartTeach = view.findViewById(R.id.btn_start_teach)
         btnStopTeach = view.findViewById(R.id.btn_stop_teach)
@@ -95,6 +99,14 @@ class TeachRepeatFragment : DJIFragment(), SurfaceHolder.Callback {
     }
 
     private fun initListeners() {
+        btnTakeoff.setOnClickListener {
+            viewModel.startTakeOff()
+        }
+
+        btnLanding.setOnClickListener {
+            viewModel.startLanding()
+        }
+
         btnStartTeach.setOnClickListener {
             context?.let { ctx ->
                 viewModel.startTeachRecording(ctx)

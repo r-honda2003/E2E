@@ -10,8 +10,10 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import androidx.lifecycle.MutableLiveData
+import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.RemoteControllerKey
 import dji.sdk.keyvalue.value.common.ComponentIndexType
+import dji.v5.et.action
 import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
 import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
@@ -109,6 +111,22 @@ class TeachRepeatVM : DJIViewModel() {
             val4?.let { stickValue.value?.throttle = it }
             stickValue.postValue(stickValue.value)
         }
+    }
+
+    fun startTakeOff() {
+        FlightControllerKey.KeyStartTakeoff.create().action({
+            dji.v5.ux.util.ToastUtils.showToast("Takeoff Success")
+        }, { error: IDJIError ->
+            dji.v5.ux.util.ToastUtils.showToast("Takeoff Failed: ${error.description()}")
+        })
+    }
+
+    fun startLanding() {
+        FlightControllerKey.KeyStartAutoLanding.create().action({
+            dji.v5.ux.util.ToastUtils.showToast("Landing Success")
+        }, { error: IDJIError ->
+            dji.v5.ux.util.ToastUtils.showToast("Landing Failed: ${error.description()}")
+        })
     }
 
     fun startCameraStream(cameraIndex: ComponentIndexType) {
